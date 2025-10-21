@@ -208,11 +208,6 @@ class OpenCVCamera(Camera):
         if self.videocapture is None:
             raise DeviceNotConnectedError(f"{self} videocapture is not initialized")
 
-        if self.fps is None:
-            self.fps = self.videocapture.get(cv2.CAP_PROP_FPS)
-        else:
-            self._validate_fps()
-
         default_width = int(round(self.videocapture.get(cv2.CAP_PROP_FRAME_WIDTH)))
         default_height = int(round(self.videocapture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
