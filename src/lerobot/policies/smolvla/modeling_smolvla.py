@@ -52,6 +52,7 @@ policy = SmolVLAPolicy.from_pretrained("lerobot/smolvla_base")
 
 """
 
+import logging
 import math
 from collections import deque
 
@@ -235,6 +236,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         self.model = VLAFlowMatching(config)
         self.reset()
+        self.debug_mode = True
 
     def reset(self):
         """This should be called whenever the environment is reset."""
@@ -315,12 +317,32 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if self.config.adapt_to_pi_aloha:
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
             batch[ACTION] = self._pi_aloha_encode_actions_inv(batch[ACTION])
-
+        
+        # images is a list, and each element is batch x channels x height x width, 
+        # if there are multiple cameras, we will have multiple elements in the list.
+        # img_masks is a list, and each element is batch, it just indicates if 
+        # the image is valid or not. If it valid, then the mask is True, otherwise False.
         images, img_masks = self.prepare_images(batch)
+        if self.config.debug_mode:
+            print("images.shape", len(images), images[0].shape)
+            print("img_masks.shape", len(img_masks), img_masks[0].shape)
+
         state = self.prepare_state(batch)
         lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
+        if self.config.debug_mode:
+            print(OBS_LANGUAGE_TOKENS)
+            print("lang_tokens.shape", lang_tokens.shape)
+
         lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+        if self.config.debug_mode:
+            print(OBS_LANGUAGE_ATTENTION_MASK)
+            print("lang_masks.shape", lang_masks.shape)
+            
         actions = self.prepare_action(batch)
+        if self.config.debug_mode:
+            print("batch[ACTION].shape", batch[ACTION].shape)
+            print("actions.shape", actions.shape)
+
         actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
@@ -333,6 +355,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         # Remove padding
         original_action_dim = self.config.action_feature.shape[0]
+        print("original_action_dim", original_action_dim)
         losses = losses[:, :, : original_action_dim]
         loss_dict["losses_after_rm_padding"] = losses.clone()
 
@@ -475,7 +498,6 @@ class VLAFlowMatching(nn.Module):
     def __init__(self, config: SmolVLAConfig):
         super().__init__()
         self.config = config
-
         self.vlm_with_expert = SmolVLMWithExpertModel(
             model_id=self.config.vlm_model_name,
             freeze_vision_encoder=self.config.freeze_vision_encoder,
@@ -562,7 +584,6 @@ class VLAFlowMatching(nn.Module):
                 pad_masks.append(image_start_mask)
 
             img_emb = self.vlm_with_expert.embed_image(img)
-            img_emb = img_emb
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
@@ -593,6 +614,8 @@ class VLAFlowMatching(nn.Module):
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
         lang_emb = lang_emb * math.sqrt(lang_emb_dim)
+        if self.config.debug_mode:
+            print("lang_emb.shape", lang_emb.shape)
 
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
@@ -601,6 +624,8 @@ class VLAFlowMatching(nn.Module):
         att_masks += [0] * num_lang_embs
 
         state_emb = self.state_proj(state)
+        if self.config.debug_mode:
+            print("state_emb.shape", state_emb.shape)
         state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
         embs.append(state_emb)
         bsize = state_emb.shape[0]
@@ -654,7 +679,6 @@ class VLAFlowMatching(nn.Module):
         action_time_emb = self.action_time_mlp_in(action_time_emb)
         action_time_emb = F.silu(action_time_emb)  # swish == silu
         action_time_emb = self.action_time_mlp_out(action_time_emb)
-
         # Add to input tokens
         embs.append(action_time_emb)
 
@@ -679,20 +703,43 @@ class VLAFlowMatching(nn.Module):
 
         if time is None:
             time = self.sample_time(actions.shape[0], actions.device)
-
         time_expanded = time[:, None, None]
+        if self.config.debug_mode:
+            print("noise.shape", noise.shape)
+            print("actions.shape", actions.shape)
+            print("time.shape", time.shape)
+            print("time_expanded.shape", time_expanded.shape)
         x_t = time_expanded * noise + (1 - time_expanded) * actions
+        if self.config.debug_mode:
+            print("x_t.shape", x_t.shape)
         u_t = noise - actions
+        if self.config.debug_mode:
+            print("velocity.shape", u_t.shape)
+
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
+        if self.config.debug_mode:
+            print("prefix_embs.shape", prefix_embs.shape)
+            print("prefix_pad_masks.shape", prefix_pad_masks.shape)
+            print("prefix_att_masks.shape", prefix_att_masks.shape)
         suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, time)
+        if self.config.debug_mode:
+            print("suffix_embs.shape", suffix_embs.shape)
+            print("suffix_pad_masks.shape", suffix_pad_masks.shape)
+            print("suffix_att_masks.shape", suffix_att_masks.shape)
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
+        if self.config.debug_mode:
+            print("pad_masks.shape", pad_masks.shape)
+            print("att_masks.shape", att_masks.shape)
 
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
+        if self.config.debug_mode:
+            print("att_2d_masks.shape", att_2d_masks.shape)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
+
         (_, suffix_out), _ = self.vlm_with_expert.forward(
             attention_mask=att_2d_masks,
             position_ids=position_ids,
@@ -702,6 +749,8 @@ class VLAFlowMatching(nn.Module):
             fill_kv_cache=False,
         )
         suffix_out = suffix_out[:, -self.config.chunk_size :]
+        if self.config.debug_mode:
+            print("suffix_out.shape:", suffix_out.shape)
         # Original openpi code, upcast attention output
         suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
