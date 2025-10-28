@@ -140,6 +140,13 @@ Attention Matrix (1 = can attend, 0 = cannot):
     - This produces the final action token embeddings that enter the transformer
 
 - Language, image, and state are feed into VLM model, while actions are feed into action LM expert.
+    - Image is resized to (512, 512) and then break into (8, 8) patches. So the number of image token is 64. The embedding dimension is 960.
+    - The number of language token could be as large as `tokenizer_max_length`. In this Push-T data, it is always 14 ('Push the T-shaped block onto the T-shaped target.'). Padding is to pad to the longest which is also 14. The embedding dimension is 960.
+    - The number of state tokens is just 1. We use a linear projection to project from `max_state_dim` to the embedding dimension 960.
+    - The number of action token is `chunk_size` 50, and the embedding dimension is 720 = 960 * `expert_width_multiplier`. The action in push-T is just a 2 dimensional vector,
+    it is padded to `max_action_dim`
+    - In summary, we have 64 + 14 + 1 = 79 tokens for VLM model and we have 50 tokens for LM action expert model. So there are 129 tokens for the input. We will also need
+    pad_mask and att_mask for each token because we want to know attention relations among these tokens. 
 
 ## SmolVLMWithExpertModel
 
@@ -154,10 +161,18 @@ multiple query heads can share the same key_value head.
     - For cross-attention mode, LM expert takes in the key/value pairs from VLM model. 
     - It just does self-attention every `self_attn_every_n_layers` layer.
 
-- It outputs embeddings and kv caches 
+- It outputs embeddings and kv caches. 
+    - For self-attention module, it uses 15 heads for query, 5 heads for key and value, and each embedding dimension is 64. So 15 * 64 = 960 for prefix tokens. Each head is a 960 to 64 projection.
+        - For kv values, it is a (B, L, H, D)  with L = 79 + 50 sequence length, H=15 number of heads, D=64 head dim. 
+            - 79 is for prefix tokens, e.g. image, language and states. 50 is for the suffix tokens, e.g. actions. These tokens are feed into different models. One is LVM and 
+            another is LM Action expert for Key, Query, Value projection. But finally, they are stacked together for attention with some causal masks.
+        - It applies RoPE for the key and query.
+    - For cross-attention module, it generate two attention outputs. So the LVM does self-attention on its own prefix tokens input. And the LM expert also does self-attention on its own suffix tokens input. 
 
 
 ## SmolVLA Select Action
 
 - SmolVLA can predict `n_chunk_size` actions, but will execute first `n_action_steps` actions among them before next prediction.
 - It needs to sample the actions based on flow matching model.
+- It leverages kv caching. This is because for flow matching, only LM action expert's input token, aka, action tokens are changing. 
+For VLM model, its input tokens don't change so we can cache its key & value pairs for cross-attention with LM action expert.
