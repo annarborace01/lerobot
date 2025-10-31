@@ -508,6 +508,7 @@ class VLAFlowMatching(nn.Module):
             num_vlm_layers=self.config.num_vlm_layers,
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
+            debug_mode=self.config.debug_mode,
         )
         self.state_proj = nn.Linear(
             self.config.max_state_dim, self.vlm_with_expert.config.text_config.hidden_size
@@ -582,6 +583,8 @@ class VLAFlowMatching(nn.Module):
                 pad_masks.append(image_start_mask)
 
             img_emb = self.vlm_with_expert.embed_image(img)
+            if self.config.debug_mode:
+                print("img_emb.shape", img_emb.shape)
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
@@ -673,10 +676,13 @@ class VLAFlowMatching(nn.Module):
 
         time_emb = time_emb[:, None, :].expand_as(action_emb)
         action_time_emb = torch.cat([action_emb, time_emb], dim=2)
-
+        if self.config.debug_mode:
+            print("action_time_emb.shape", action_time_emb.shape)
         action_time_emb = self.action_time_mlp_in(action_time_emb)
         action_time_emb = F.silu(action_time_emb)  # swish == silu
         action_time_emb = self.action_time_mlp_out(action_time_emb)
+        if self.config.debug_mode:
+            print("action_time_emb.shape after MLP", action_time_emb.shape)
         # Add to input tokens
         embs.append(action_time_emb)
 

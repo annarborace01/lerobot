@@ -70,8 +70,10 @@ class SmolVLMWithExpertModel(nn.Module):
         num_vlm_layers: int = -1,
         self_attn_every_n_layers: int = -1,
         expert_width_multiplier: float = 0.5,
+        debug_mode: bool = False,
     ):
         super().__init__()
+        self.debug_mode = debug_mode
         if load_vlm_weights:
             print(f"Loading  {model_id} weights ...")
             self.vlm = AutoModelForImageTextToText.from_pretrained(
@@ -207,6 +209,8 @@ class SmolVLMWithExpertModel(nn.Module):
         fill_kv_cache: bool = True,
         past_key_values=None,
     ) -> list[torch.Tensor]:
+        if self.debug_mode:
+            print("================= Inside forward_attn_layer() ================= ")
         query_states = []
         key_states = []
         value_states = []
@@ -214,16 +218,30 @@ class SmolVLMWithExpertModel(nn.Module):
             layer = model_layers[i][layer_idx]
             if hidden_states is None or layer is None:
                 continue
+            if self.debug_mode:
+                print("input hidden_states.shape: ", hidden_states.shape)
             hidden_states = layer.input_layernorm(hidden_states)
 
             input_shape = hidden_states.shape[:-1]
+            if self.debug_mode:
+                print("input_shape: ", input_shape)
             hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
-
+            if self.debug_mode:
+                print("hidden_shape: ", hidden_shape)
             hidden_states = hidden_states.to(dtype=layer.self_attn.q_proj.weight.dtype)
             query_state = layer.self_attn.q_proj(hidden_states).view(hidden_shape)
             key_state = layer.self_attn.k_proj(hidden_states).view(hidden_shape)
             value_state = layer.self_attn.v_proj(hidden_states).view(hidden_shape)
 
+            if self.debug_mode:
+                print("layer.self_attn.q_proj: ", layer.self_attn.q_proj)
+                print("layer.self_attn.k_proj: ", layer.self_attn.k_proj)
+                print("layer.self_attn.v_proj: ", layer.self_attn.v_proj)
+
+                print("layer.self_attn.q_proj(hidden_states).shape: ", layer.self_attn.q_proj(hidden_states).shape)
+                print("layer.self_attn.k_proj(hidden_states).shape: ", layer.self_attn.k_proj(hidden_states).shape)
+                print("layer.self_attn.v_proj(hidden_states).shape: ", layer.self_attn.v_proj(hidden_states).shape)
+                
             query_states.append(query_state)
             key_states.append(key_state)
             value_states.append(value_state)
@@ -231,8 +249,15 @@ class SmolVLMWithExpertModel(nn.Module):
         # B,L,H,D with L sequence length, H number of heads, D head dim
         # concatenate on the number of embeddings/tokens
         query_states = torch.cat(query_states, dim=1)
+        if self.debug_mode:
+            print("query_states shape: ", query_states.shape)
         key_states = torch.cat(key_states, dim=1)
+        if self.debug_mode:
+            print("key_states shape: ", key_states.shape)
         value_states = torch.cat(value_states, dim=1)
+        if self.debug_mode:
+            print("value_states shape: ", value_states.shape)
+
         seq_len = query_states.shape[1]
         if seq_len < position_ids.shape[1]:
             _position_ids = position_ids[:, :seq_len]
@@ -269,6 +294,8 @@ class SmolVLMWithExpertModel(nn.Module):
         att_output = attention_interface(
             attention_mask_, batch_size, head_dim, query_states, key_states, value_states
         )
+        if self.debug_mode:
+            print("================= Exiting forward_attn_layer() ================= ")
         return [att_output], past_key_values
 
     def forward_cross_attn_layer(
@@ -284,6 +311,8 @@ class SmolVLMWithExpertModel(nn.Module):
         fill_kv_cache: bool = True,
         past_key_values=None,
     ) -> list[torch.Tensor]:
+        if self.debug_mode:
+            print("================= Inside forward_cross_attn_layer() ================= ")
         attention_interface = self.get_attention_interface()
 
         att_outputs = []
@@ -384,6 +413,8 @@ class SmolVLMWithExpertModel(nn.Module):
             att_outputs.append(None)
 
         # att_output = att_output.to(dtype=models[i].dtype)
+        if self.debug_mode:
+            print("================= Exiting forward_cross_attn_layer() ================= ")
         return att_outputs, past_key_values
 
     def get_model_layers(self, models: list) -> list:
@@ -409,8 +440,15 @@ class SmolVLMWithExpertModel(nn.Module):
         use_cache: bool | None = None,
         fill_kv_cache: bool | None = None,
     ):
+        if self.debug_mode:
+            print("================= Inside SmolVLMWithExpertModel forward() ================= ")
         models = [self.get_vlm_model().text_model, self.lm_expert]
         model_layers = self.get_model_layers(models)
+        if self.debug_mode:
+            print("models[0].layers.shape", len(models[0].layers))
+            print("inputs_embeds[0].shape", inputs_embeds[0].shape)
+            print("models[1].layers.shape", len(models[1].layers))
+            print("inputs_embeds[1].shape", inputs_embeds[1].shape)
         for hidden_states in inputs_embeds:
             # TODO this is very inefficient
             # dtype is always the same, batch size too (if > 1 len)
@@ -423,11 +461,16 @@ class SmolVLMWithExpertModel(nn.Module):
         num_layers = self.num_vlm_layers
         head_dim = self.vlm.config.text_config.head_dim
         for layer_idx in range(num_layers):
+            if self.debug_mode:
+                print("================================layer_idx: ", layer_idx)
+                print("fill_kv_cache: ", fill_kv_cache)
             if (
                 fill_kv_cache
                 or "cross" not in self.attention_mode
                 or (self.self_attn_every_n_layers > 0 and layer_idx % self.self_attn_every_n_layers == 0)
             ):
+                if self.debug_mode:
+                    print("forward_attn_layer.................")
                 att_outputs, past_key_values = self.forward_attn_layer(
                     model_layers,
                     inputs_embeds,
@@ -441,6 +484,8 @@ class SmolVLMWithExpertModel(nn.Module):
                     past_key_values=past_key_values,
                 )
             else:
+                if self.debug_mode:
+                    print("forward_cross_attn_layer.................")
                 att_outputs, past_key_values = self.forward_cross_attn_layer(
                     model_layers,
                     inputs_embeds,
@@ -495,7 +540,11 @@ class SmolVLMWithExpertModel(nn.Module):
                 outputs_embeds.append(out_emb)
             else:
                 outputs_embeds.append(None)
+        
+        if self.debug_mode:
+            print("================= Exiting SmolVLMWithExpertModel forward() ================= ")
         return outputs_embeds, past_key_values
+        
 
     def get_attention_interface(self):
         attention_interface = self.eager_attention_forward
@@ -539,11 +588,17 @@ class SmolVLMWithExpertModel(nn.Module):
         masked_att_weights = torch.where(attention_mask[:, None, :, :], att_weights, big_neg)
         probs = nn.functional.softmax(masked_att_weights, dim=-1)
         probs = probs.to(dtype=value_states.dtype)
-
+        if self.debug_mode:
+            print("probs shape: ", probs.shape)
+            print("value_states shape: ", value_states.shape)
         att_output = torch.matmul(probs, value_states.permute(0, 2, 1, 3))
-
+        if self.debug_mode:
+            print("att_output shape: ", att_output.shape)
         att_output = att_output.permute(0, 2, 1, 3)
+        if self.debug_mode:
+            print("att_output permute shape: ", att_output.shape)
         # we use -1 because sequence length can change
         att_output = att_output.reshape(batch_size, -1, num_key_value_heads * num_key_value_groups * head_dim)
-
+        if self.debug_mode:
+            print("att_output reshape shape: ", att_output.shape)
         return att_output
