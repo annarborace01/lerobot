@@ -176,3 +176,17 @@ multiple query heads can share the same key_value head.
 - It needs to sample the actions based on flow matching model.
 - It leverages kv caching. This is because for flow matching, only LM action expert's input token, aka, action tokens are changing. 
 For VLM model, its input tokens don't change so we can cache its key & value pairs for cross-attention with LM action expert.
+
+
+```
+python src/lerobot/scripts/lerobot_train.py \
+  --policy.path=annarborace01/smolvla-test \
+  --dataset.repo_id=lerobot/pusht \
+  --batch_size=64 \
+  --steps=20000 \
+  --output_dir=outputs/train/my_smolvla_pusht \
+  --job_name=my_smolvla_pusht_training \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --policy.push_to_hub=false
+```
