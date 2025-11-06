@@ -505,9 +505,13 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
     def __init__(self, config: PI05Config):
         super().__init__()
         self.config = config
+        self.debug_mode = config.debug_mode
 
         paligemma_config = get_gemma_config(config.paligemma_variant)
         action_expert_config = get_gemma_config(config.action_expert_variant)
+        if self.debug_mode:
+            print("paligemma_config", paligemma_config)
+            print("action_expert_config", action_expert_config)
 
         self.paligemma_with_expert = PaliGemmaWithExpertModel(
             paligemma_config,
@@ -686,6 +690,13 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
+        if self.debug_mode:
+            print("x_t.shape", x_t.shape)
+            print("u_t.shape", u_t.shape)
+            print("time_expanded.shape", time_expanded.shape)
+            print("noise.shape", noise.shape)
+            print("actions.shape", actions.shape)
+            print("time.shape", time.shape)
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, tokens, masks)
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(x_t, time)
@@ -840,6 +851,7 @@ class PI05Policy(PreTrainedPolicy):
 
         # Initialize the core PI05 model
         self.model = PI05Pytorch(config)
+        self.debug_mode = config.debug_mode
 
         # Enable gradient checkpointing if requested
         if config.gradient_checkpointing:

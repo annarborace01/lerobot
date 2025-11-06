@@ -25,6 +25,7 @@ from lerobot.optim.schedulers import CosineDecayWithWarmupSchedulerConfig
 @PreTrainedConfig.register_subclass("pi05")
 @dataclass
 class PI05Config(PreTrainedConfig):
+    debug_mode: bool = False
     paligemma_variant: str = "gemma_2b"
     action_expert_variant: str = "gemma_300m"
     dtype: str = "float32"  # Options: "bfloat16", "float32"
