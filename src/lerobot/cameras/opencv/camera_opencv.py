@@ -220,6 +220,11 @@ class OpenCVCamera(Camera):
         else:
             self._validate_width_and_height()
 
+        if self.fps is None:
+            self.fps = self.videocapture.get(cv2.CAP_PROP_FPS)
+        else:
+            self._validate_fps()
+
     def _validate_fps(self) -> None:
         """Validates and sets the camera's frames per second (FPS)."""
 
