@@ -236,7 +236,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         self.model = VLAFlowMatching(config)
         self.reset()
-        self.debug_mode = True
 
     def reset(self):
         """This should be called whenever the environment is reset."""
@@ -355,7 +354,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         # Remove padding
         original_action_dim = self.config.action_feature.shape[0]
-        print("original_action_dim", original_action_dim)
         losses = losses[:, :, : original_action_dim]
         loss_dict["losses_after_rm_padding"] = losses.clone()
 
