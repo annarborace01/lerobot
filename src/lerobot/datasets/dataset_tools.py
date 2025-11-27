@@ -234,6 +234,7 @@ def merge_datasets(
     datasets: list[LeRobotDataset],
     output_repo_id: str,
     output_dir: str | Path | None = None,
+    overwrite: bool = False,
 ) -> LeRobotDataset:
     """Merge multiple LeRobotDatasets into a single dataset.
 
@@ -243,11 +244,19 @@ def merge_datasets(
         datasets: List of LeRobotDatasets to merge.
         output_repo_id: Repository ID for the merged dataset.
         output_dir: Directory to save the merged dataset. If None, uses default location.
+        overwrite: If True, removes existing output directory before merging. Defaults to False.
     """
     if not datasets:
         raise ValueError("No datasets to merge")
 
     output_dir = Path(output_dir) if output_dir is not None else HF_LEROBOT_HOME / output_repo_id
+
+    # Clean up existing output directory if overwrite is True
+    if overwrite and output_dir.exists():
+        import shutil
+        import logging
+        logging.info(f"Removing existing output directory: {output_dir}")
+        shutil.rmtree(output_dir)
 
     repo_ids = [ds.repo_id for ds in datasets]
     roots = [ds.root for ds in datasets]
