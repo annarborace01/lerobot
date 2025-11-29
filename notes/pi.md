@@ -12,7 +12,6 @@ pip install "lerobot[pi]"
 ```
 python src/lerobot/scripts/lerobot_train.py \
   --policy.path=lerobot/pi05_base \
-  --dataset.repo_id=lerobot/pi05_base \
   --dataset.repo_id=lerobot/pusht \
   --batch_size=16 \
   --steps=20000 \
